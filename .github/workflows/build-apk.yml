@@ -1,0 +1,69 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Criar projeto Android
+        run: npx cap add android
+
+      - name: Aplicar permissões, plugin de galeria e orientação
+        run: |
+          PKG=android/app/src/main/java/com/cameracinema/app
+          cp native/GallerySaverPlugin.java $PKG/GallerySaverPlugin.java
+          cp native/MainActivity.java $PKG/MainActivity.java
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />#' $M
+          sed -i 's#<activity#<activity android:screenOrientation="sensorLandscape"#' $M
+          sed -i 's/minSdkVersion = .*/minSdkVersion = 29/' android/variables.gradle
+          cat $M
+
+      - name: Gerar ícones do app
+        run: |
+          RES=android/app/src/main/res
+          for spec in mdpi:48:108 hdpi:72:162 xhdpi:96:216 xxhdpi:144:324 xxxhdpi:192:432; do
+            IFS=: read d l a <<< "$spec"
+            mkdir -p $RES/mipmap-$d
+            convert icon.png -resize ${l}x${l} $RES/mipmap-$d/ic_launcher.png
+            convert icon.png -resize ${l}x${l} \( -size ${l}x${l} xc:none -fill white -draw "circle $((l/2)),$((l/2)) $((l/2)),0" \) -compose DstIn -composite $RES/mipmap-$d/ic_launcher_round.png
+            f=$((a*72/100))
+            convert icon.png -resize ${f}x${f} -background none -gravity center -extent ${a}x${a} $RES/mipmap-$d/ic_fg.png
+            convert icon.png -resize $((a*150/100))x$((a*150/100)) -gravity center -crop ${a}x${a}+0+0 +repage -blur 0x$((a/20)) -brightness-contrast -25x0 $RES/mipmap-$d/ic_bg.png
+          done
+          mkdir -p $RES/mipmap-anydpi-v26
+          for n in ic_launcher ic_launcher_round; do
+            printf '<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n<background android:drawable="@mipmap/ic_bg"/>\n<foreground android:drawable="@mipmap/ic_fg"/>\n</adaptive-icon>\n' > $RES/mipmap-anydpi-v26/$n.xml
+          done
+
+      - name: Sincronizar web
+        run: npx cap sync android
+
+      - name: Compilar APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Camera-Cinema-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
