@@ -1,0 +1,7 @@
+{
+  "appId": "com.cameracinema.app",
+  "appName": "CINEMATIC JAVARTT",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "backgroundColor": "#000000"
+}

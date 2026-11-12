@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>CINEMATIC JAVARTT</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#000;--fg:#f2f2f2;--mut:#8a8a8a;--acc:#e5322d;--pan:rgba(18,18,20,.92);color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:13px -apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+#app{position:relative;height:100%;display:flex;flex-direction:column}
+#stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+canvas#out{max-width:100%;max-height:100%;aspect-ratio:16/9;background:#000}
+#grid{position:absolute;pointer-events:none;display:none;aspect-ratio:16/9;max-width:100%;max-height:100%;width:100%;background:linear-gradient(#fff3,#fff3) 33.3% 0/1px 100% no-repeat,linear-gradient(#fff3,#fff3) 66.6% 0/1px 100% no-repeat,linear-gradient(#fff3,#fff3) 0 33.3%/100% 1px no-repeat,linear-gradient(#fff3,#fff3) 0 66.6%/100% 1px no-repeat}
+#hud{position:absolute;top:8px;left:0;right:0;display:flex;justify-content:space-between;padding:0 12px;pointer-events:none;font-variant-numeric:tabular-nums;text-shadow:0 1px 3px #000}
+#tc{font-size:18px;font-weight:600;display:flex;align-items:center;gap:8px}
+#dot{width:10px;height:10px;border-radius:50%;background:#555}
+.rec #dot{background:var(--acc);animation:b 1s infinite}
+@keyframes b{50%{opacity:.2}}
+#info{color:var(--mut);font-size:12px}
+#bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:#0a0a0a;border-top:1px solid #222}
+.btn{background:#1c1c1f;border:1px solid #2c2c30;color:var(--fg);border-radius:10px;padding:10px 12px;font:inherit;min-width:44px;min-height:44px}
+.btn.on{background:#2a2a2f;border-color:#555}
+#rec{width:68px;height:68px;border-radius:50%;border:4px solid #fff;background:transparent;display:grid;place-items:center;padding:0}
+#rec i{width:48px;height:48px;border-radius:50%;background:var(--acc);transition:.15s}
+.rec #rec i{width:26px;height:26px;border-radius:6px}
+#panel{position:absolute;left:0;right:0;bottom:0;background:var(--pan);backdrop-filter:blur(12px);max-height:62%;overflow:auto;padding:12px 14px;border-top:1px solid #333;display:none;z-index:5}
+#panel.open{display:block}
+.tabs{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto}
+.tabs .btn{white-space:nowrap}
+.row{display:flex;align-items:center;gap:10px;margin:6px 0}
+.row label{width:96px;color:var(--mut)}
+.row input[type=range]{flex:1;accent-color:#e5322d}
+.row output{width:40px;text-align:right;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+#clips{display:flex;gap:8px;overflow-x:auto}
+.clip{flex:0 0 150px;background:#151517;border-radius:10px;padding:6px}
+.clip video{width:100%;border-radius:6px;background:#000}
+.clip .btn{width:100%;margin-top:6px;padding:8px}
+#msg{position:absolute;top:44px;left:50%;transform:translateX(-50%);background:#000c;padding:8px 14px;border-radius:20px;display:none;z-index:6;max-width:90%;text-align:center}
+#start{position:absolute;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9;text-align:center;padding:24px}
+#start h1{margin:0;font-weight:300;letter-spacing:6px;font-size:22px}
+#start p{color:var(--mut);max-width:320px;margin:0}
+#start .btn{background:var(--acc);border:0;font-size:15px;padding:14px 28px}
+</style></head><body>
+<div id="app">
+ <div id="stage">
+  <canvas id="out" width="1920" height="1080"></canvas>
+  <div id="grid"></div>
+  <div id="hud"><div id="tc"><span id="dot"></span><span id="time">00:00:00</span></div><div id="info"></div></div>
+  <div id="msg"></div>
+  <div id="panel">
+   <div class="tabs" id="tabs"></div>
+   <div id="tabbody"></div>
+  </div>
+ </div>
+ <div id="bar">
+  <button class="btn" id="bClips">🎞 Clipes</button>
+  <button class="btn" id="bCam">⟲ Câmera</button>
+  <button id="rec" aria-label="Gravar"><i></i></button>
+  <button class="btn" id="bCfg">⚙ Câmera</button>
+  <button class="btn" id="bColor">🎨 Cor</button>
+ </div>
+ <div id="start"><h1>CINEMATIC JAVARTT</h1><p>Câmera de vídeo profissional com color grading em tempo real, barras cinemascope e gravação em alta qualidade. Use o celular na horizontal.</p><button class="btn" id="go">Abrir câmera</button></div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const out=$('#out'),gl=out.getContext('webgl',{preserveDrawingBuffer:false,antialias:false,alpha:false,desynchronized:true,powerPreference:'high-performance'});
+const vid=document.createElement('video');vid.muted=true;vid.playsInline=true;
+let stream=null,facing='environment',rec=null,chunks=[],t0=0,recording=false,wake=null;
+const S={res:1080,fps:24,aspect:2.39,bitrate:25,grid:false,audio:true};
+const P={exp:0,con:.2,sat:1,temp:0,tint:0,fade:.03,vig:.25,grain:.12,split:.0,bloom:.0};
+const LOOKS={
+ 'Natural':{exp:0,con:.1,sat:1,temp:0,tint:0,fade:0,vig:.1,grain:.05,split:0,bloom:0},
+ 'Cinema':{exp:-.05,con:.3,sat:1.05,temp:.05,tint:0,fade:.04,vig:.3,grain:.1,split:.45,bloom:.15},
+ 'Teal & Orange':{exp:0,con:.35,sat:1.15,temp:.1,tint:-.05,fade:.05,vig:.3,grain:.1,split:.8,bloom:.1},
+ 'Noir':{exp:-.1,con:.6,sat:0,temp:0,tint:0,fade:.05,vig:.45,grain:.25,split:0,bloom:.1},
+ 'Vintage 35mm':{exp:.05,con:.15,sat:.8,temp:.25,tint:.05,fade:.12,vig:.35,grain:.3,split:.25,bloom:.2},
+ 'Frio Thriller':{exp:-.15,con:.4,sat:.75,temp:-.3,tint:-.05,fade:.06,vig:.4,grain:.15,split:.5,bloom:0},
+ 'Pôr do Sol':{exp:.05,con:.2,sat:1.2,temp:.4,tint:.08,fade:.04,vig:.3,grain:.1,split:.3,bloom:.25}};
+function applyLook(n){Object.assign(P,LOOKS[n]);drawTab();}
+
+// ---------- WebGL ----------
+const vs='attribute vec2 p;varying vec2 v;uniform vec4 uv;void main(){v=p*.5+.5;v.y=1.-v.y;v=v*uv.xy+uv.zw;gl_Position=vec4(p,0,1);}';
+const fs=`precision highp float;varying vec2 v;uniform sampler2D t;uniform float exp_,con,sat,temp,tint,fade,vig,grain,split,bloom,time,bar;uniform vec2 sc;
+float h(vec2 x){return fract(sin(dot(x,vec2(12.9898,78.233))+time)*43758.5453);}
+void main(){
+ vec2 q=gl_FragCoord.xy/sc; // 0..1
+ vec3 c=texture2D(t,v).rgb;
+ if(bloom>0.){vec3 b=vec3(0);for(int i=0;i<8;i++){float a=float(i)*.785;b+=texture2D(t,v+vec2(cos(a),sin(a))*.012).rgb;}b/=8.;c+=max(b-.55,0.)*bloom*1.6;}
+ c*=pow(2.,exp_);
+ c.r*=1.+temp*.35;c.b*=1.-temp*.35;c.g*=1.-tint*.25;c.r*=1.+tint*.1;c.b*=1.+tint*.1;
+ float l=dot(c,vec3(.2126,.7152,.0722));
+ c=mix(vec3(l),c,sat);
+ c=clamp(c,0.,1.);
+ vec3 s=c*c*(3.-2.*c);c=mix(c,s,con);   // S-curve
+ float sh=1.-smoothstep(0.,.5,l),hi=smoothstep(.5,1.,l);
+ c+=split*(sh*vec3(-.05,.03,.08)+hi*vec3(.09,.035,-.06));
+ c=mix(c,vec3(.5),0.)+fade*(1.-c);
+ float d=distance(q,vec2(.5,.5));c*=1.-vig*smoothstep(.3,.85,d*1.15);
+ c+=(h(q*sc)-.5)*grain*.25*(1.-abs(l-.5));
+ float hb=(1.-bar)*.5;if(q.y<hb||q.y>1.-hb)c=vec3(0);
+ gl_FragColor=vec4(clamp(c,0.,1.),1);}`;
+function sh(t,s){const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o;}
+const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);gl.useProgram(pr);
+const bf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,bf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+const lp=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(lp);gl.vertexAttribPointer(lp,2,gl.FLOAT,false,0,0);
+const tx=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tx);
+[gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T].forEach(k=>gl.texParameteri(gl.TEXTURE_2D,k,gl.CLAMP_TO_EDGE));
+[gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER].forEach(k=>gl.texParameteri(gl.TEXTURE_2D,k,gl.LINEAR));
+const U=n=>gl.getUniformLocation(pr,n);
+
+function frame(){
+ if(vid.readyState>=2&&vid.videoWidth){
+  gl.bindTexture(gl.TEXTURE_2D,tx);
+  try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,vid);}catch(e){}
+  // cover crop to 16:9
+  const va=vid.videoWidth/vid.videoHeight,ta=16/9;let sx=1,sy=1;
+  if(va>ta)sx=ta/va;else sy=va/ta;
+  gl.uniform4f(U('uv'),sx,sy,(1-sx)/2,(1-sy)/2);
+  gl.uniform1f(U('exp_'),P.exp);['con','sat','temp','tint','fade','vig','grain','split','bloom'].forEach(k=>gl.uniform1f(U(k),P[k]));
+  gl.uniform1f(U('time'),performance.now()%1000/1000*7);
+  gl.uniform1f(U('bar'),Math.min(1,(16/9)/S.aspect));
+  gl.uniform2f(U('sc'),out.width,out.height);
+  gl.viewport(0,0,out.width,out.height);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+ }
+ if(recording){const s=(performance.now()-t0)/1000|0;$('#time').textContent=[s/3600|0,s/60%60|0,s%60].map(x=>String(x|0).padStart(2,'0')).join(':');}
+ (vid.requestVideoFrameCallback?vid.requestVideoFrameCallback.bind(vid):requestAnimationFrame)(frame);
+}
+// fallback para garantir loop quando não há frames novos
+setInterval(()=>{if(vid.paused&&stream)vid.play().catch(()=>{});},2000);
+
+// ---------- Câmera ----------
+function msg(t,ms=2500){const m=$('#msg');m.textContent=t;m.style.display='block';clearTimeout(msg.t);msg.t=setTimeout(()=>m.style.display='none',ms);}
+async function openCam(){
+ if(recording)return msg('Pare a gravação antes de trocar a câmera');
+ if(stream)stream.getTracks().forEach(t=>t.stop());
+ const H=S.res===2160?2160:1080,W=H*16/9;
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:W},height:{ideal:H},frameRate:{ideal:S.fps,min:24}},audio:S.audio?{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:2,sampleRate:48000}:false});
+ }catch(e){
+  try{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:S.audio});msg('Configuração máxima indisponível; usando padrão');}
+  catch(e2){msg('Sem acesso à câmera/microfone. Permita nas configurações do navegador.',5000);return false;}
+ }
+ vid.srcObject=stream;await vid.play().catch(()=>{});
+ const set=stream.getVideoTracks()[0].getSettings();
+ out.width=S.res===2160?3840:1920;out.height=S.res===2160?2160:1080;
+ $('#info').textContent=`${set.width||'?'}×${set.height||'?'} · ${Math.round(set.frameRate||S.fps)}fps · ${S.aspect}:1`;
+ return true;
+}
+$('#go').onclick=async()=>{if(await openCam()){$('#start').remove();requestAnimationFrame(frame);}};
+
+// ---------- Gravação ----------
+function pickMime(){
+ const c=['video/mp4;codecs=avc1.640033,mp4a.40.2','video/mp4;codecs=avc1,mp4a','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+ return c.find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
+}
+async function toggleRec(){
+ if(!recording){
+  if(!stream)return;
+  const cs=out.captureStream(S.fps);
+  stream.getAudioTracks().forEach(t=>cs.addTrack(t));
+  const mime=pickMime();
+  try{rec=new MediaRecorder(cs,{mimeType:mime||undefined,videoBitsPerSecond:S.bitrate*1e6*(S.res===2160?2:1),audioBitsPerSecond:256000});}
+  catch(e){return msg('Gravação não suportada neste navegador',4000);}
+  chunks=[];rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  rec.onstop=finish;rec.start(1000);
+  recording=true;t0=performance.now();document.body.classList.add('rec');
+  try{wake=await navigator.wakeLock?.request('screen');}catch(e){}
+  navigator.vibrate?.(30);
+ }else{rec.stop();recording=false;document.body.classList.remove('rec');$('#time').textContent='00:00:00';wake?.release?.();}
+}
+$('#rec').onclick=toggleRec;
+const clips=[];
+async function finish(){
+ const type=rec.mimeType||'video/webm';const ext=type.includes('mp4')?'mp4':'webm';
+ const blob=new Blob(chunks,{type});chunks=[];
+ const name=`CINEMA_${new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)}.${ext}`;
+ const file=new File([blob],name,{type});
+ clips.unshift({file,url:URL.createObjectURL(blob),name});
+ msg('Vídeo gravado. Salvando na galeria…',3000);
+ await saveClip(clips[0],true);
+ if(tab==='clips')drawTab();
+}
+async function nativeSave(c){
+ const G=window.Capacitor.Plugins.GallerySaver;
+ await G.begin({name:c.name,mime:(c.file.type||'video/mp4').split(';')[0]});
+ const CH=3*1024*1024;
+ for(let o=0;o<c.file.size;o+=CH){
+  const buf=new Uint8Array(await c.file.slice(o,o+CH).arrayBuffer());
+  let s='';for(let i=0;i<buf.length;i+=0x8000)s+=String.fromCharCode.apply(null,buf.subarray(i,i+0x8000));
+  await G.write({data:btoa(s)});
+ }
+ await G.finish();
+}
+async function saveClip(c,auto){
+ if(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()){
+  try{await nativeSave(c);msg('✅ Salvo na galeria (Filmes/Camera Cinema)',3500);}catch(e){msg('Erro ao salvar: '+(e.message||e),5000);}
+  return;
+ }
+ try{
+  if(navigator.canShare&&navigator.canShare({files:[c.file]})){await navigator.share({files:[c.file],title:c.name});msg('Escolha "Salvar vídeo" para enviar à galeria');return;}
+ }catch(e){if(e.name==='AbortError'){msg('Salvamento cancelado. Use Clipes → Salvar.');return;}}
+ const a=document.createElement('a');a.href=c.url;a.download=c.name;document.body.appendChild(a);a.click();a.remove();
+ msg('Vídeo baixado no aparelho');
+}
+
+// ---------- UI ----------
+let tab='color';const panel=$('#panel');
+const TABS={color:'Cor',look:'Looks',cam:'Câmera',clips:'Clipes'};
+$('#tabs').innerHTML=Object.entries(TABS).map(([k,v])=>`<button class="btn" data-t="${k}">${v}</button>`).join('')+'<button class="btn" id="cl">✕</button>';
+$('#tabs').onclick=e=>{const t=e.target.dataset.t;if(t){tab=t;drawTab();}if(e.target.id==='cl')panel.classList.remove('open');};
+const openTab=t=>{if(panel.classList.contains('open')&&tab===t)panel.classList.remove('open');else{tab=t;panel.classList.add('open');drawTab();}};
+$('#bColor').onclick=()=>openTab('color');$('#bCfg').onclick=()=>openTab('cam');$('#bClips').onclick=()=>openTab('clips');
+$('#bCam').onclick=async()=>{facing=facing==='environment'?'user':'environment';await openCam();};
+const SL=[['exp','Exposição',-2,2,.05],['con','Contraste',0,1,.01],['sat','Saturação',0,2,.01],['temp','Temperatura',-1,1,.01],['tint','Matiz',-1,1,.01],['fade','Preto levantado',0,.3,.005],['split','Teal/Laranja',0,1,.01],['bloom','Brilho suave',0,1,.01],['vig','Vinheta',0,1,.01],['grain','Grão de filme',0,1,.01]];
+function chips(arr,cur,key){return `<div class="chips">${arr.map(([v,l])=>`<button class="btn ${cur==v?'on':''}" data-k="${key}" data-v="${v}">${l}</button>`).join('')}</div>`;}
+function drawTab(){
+ document.querySelectorAll('#tabs .btn[data-t]').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+ const b=$('#tabbody');
+ if(tab==='color'){b.innerHTML=SL.map(([k,l,a,z,s])=>`<div class="row"><label>${l}</label><input type="range" min="${a}" max="${z}" step="${s}" value="${P[k]}" data-p="${k}"><output>${(+P[k]).toFixed(2)}</output></div>`).join('')+'<button class="btn" id="rs">Restaurar</button>';
+  b.querySelectorAll('input').forEach(i=>i.oninput=()=>{P[i.dataset.p]=+i.value;i.nextElementSibling.textContent=(+i.value).toFixed(2);});
+  $('#rs').onclick=()=>applyLook('Natural');}
+ else if(tab==='look'){b.innerHTML=`<div class="chips">${Object.keys(LOOKS).map(n=>`<button class="btn" data-look="${n}">${n}</button>`).join('')}</div>`;b.querySelectorAll('[data-look]').forEach(x=>x.onclick=()=>{applyLook(x.dataset.look);tab='look';});}
+ else if(tab==='cam'){
+  b.innerHTML=`<p>Resolução</p>${chips([[1080,'Full HD 1080p'],[2160,'4K UHD']],S.res,'res')}<p>Taxa de quadros</p>${chips([[24,'24 fps (cinema)'],[30,'30 fps'],[60,'60 fps']],S.fps,'fps')}<p>Formato (barras)</p>${chips([[2.39,'2.39:1 Scope'],[2,'2.00:1'],[1.85,'1.85:1'],[1.78,'16:9']],S.aspect,'aspect')}<p>Qualidade</p>${chips([[15,'Alta'],[25,'Máxima'],[40,'Ultra']],S.bitrate,'bitrate')}<p>Auxiliares</p>${chips([[1,'Grade 3×3'],[0,'Sem grade']],S.grid?1:0,'grid')}<p>Áudio</p>${chips([[1,'Com áudio'],[0,'Mudo']],S.audio?1:0,'audio')}
+  <div id="zm"></div>`;
+  b.querySelectorAll('[data-k]').forEach(x=>x.onclick=async()=>{const k=x.dataset.k,v=+x.dataset.v;
+   if(recording&&['res','fps','audio'].includes(k))return msg('Pare a gravação para mudar isso');
+   S[k]=(k==='grid'||k==='audio')?!!v:v;$('#grid').style.display=S.grid?'block':'none';
+   if(['res','fps','audio'].includes(k))await openCam();else $('#info').textContent=$('#info').textContent.replace(/·\s[\d.]+:1/,'· '+S.aspect+':1');drawTab();});
+  const tr=stream?.getVideoTracks()[0],cap=tr?.getCapabilities?.()||{};
+  if(cap.zoom)$('#zm').innerHTML=`<div class="row"><label>Zoom</label><input type="range" min="${cap.zoom.min}" max="${cap.zoom.max}" step="${cap.zoom.step||.1}" value="${tr.getSettings().zoom||cap.zoom.min}"></div>`,$('#zm input').oninput=e=>tr.applyConstraints({advanced:[{zoom:+e.target.value}]});
+ }
+ else{b.innerHTML=clips.length?`<div id="clips">${clips.map((c,i)=>`<div class="clip"><video src="${c.url}" controls playsinline preload="metadata"></video><button class="btn" data-s="${i}">💾 Salvar na galeria</button></div>`).join('')}</div>`:'<p style="color:var(--mut)">Nenhum clipe gravado ainda.</p>';
+  b.querySelectorAll('[data-s]').forEach(x=>x.onclick=()=>saveClip(clips[+x.dataset.s]));}
+}
+tab='color';drawTab();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&stream)vid.play().catch(()=>{});});
+</script></body></html>
